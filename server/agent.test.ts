@@ -91,6 +91,97 @@ test("候选项被重命名后答序号不会误删", async (t) => {
   assert.equal(store.list().length, 2);
 });
 
+test("删除追问按完整标题选中原候选 ID，同名候选需要再次选择", async (t) => {
+  const { say, store } = await setup(t);
+  const first = store.create("删除旧照片");
+  const video = store.create("删除旧视频");
+  const photo = store.create("旧照片");
+  assert.match(await say("删除旧"), /回复序号或标题/);
+  assert.match(await say("删除旧照片"), /已删除「删除旧照片」/);
+  assert.deepEqual(store.list(), [video, photo]);
+  const a = store.create(first.title);
+  const b = store.create(first.title);
+  await say("删除旧");
+  assert.match(await say(first.title), /回复序号或标题/);
+  assert.deepEqual(store.list(), [video, photo, a, b]);
+  await say("第二个");
+  assert.deepEqual(store.list(), [video, photo, a]);
+});
+
+test("过期或发生变更的删除追问收到命令式标题时保留原记录", async (t) => {
+  const { say, store } = await setup(t);
+  const first = store.create("删除旧照片");
+  store.create("删除旧视频");
+  store.create("旧照片");
+  const question = await say("删除旧");
+  const before = store.list();
+  const restarted = createAgent(store);
+  assert.match(
+    await restarted([
+      { role: "assistant", content: question },
+      { role: "user", content: first.title },
+    ]),
+    /重新查看清单/,
+  );
+  assert.deepEqual(store.list(), before);
+  store.update(first.id, { title: "保存旧照片" });
+  const renamed = store.list();
+  assert.match(await say(first.title), /重新查看清单/);
+  assert.deepEqual(store.list(), renamed);
+});
+
+test("删除追问中输入候选以外的删除指令需要先取消", async (t) => {
+  const { say, store } = await setup(t);
+  store.create("旧照片 A");
+  store.create("旧照片 B");
+  store.create("发票");
+  const before = store.list();
+  const question = await say("删除旧照片");
+  assert.equal(await say("删除发票"), question);
+  assert.deepEqual(store.list(), before);
+  await say("取消");
+  assert.deepEqual(store.list(), before);
+  assert.match(await say("删除发票"), /已删除「发票」/);
+});
+
+test("优先级的两种词序返回相同结果，并保留工作量和完成状态筛选", async (t) => {
+  const { say, store } = await setup(t);
+  const report = store.create("交报告", { priority: 1, workload: "large" });
+  const archives = store.create("交材料", { priority: 1, workload: "small" });
+  store.create("买菜", { priority: 3, workload: "large" });
+  store.create("还书", { priority: 2 });
+  store.update(archives.id, { done: true });
+  const before = store.list();
+  for (const [level, title] of [
+    ["高", report.title],
+    ["中", "还书"],
+    ["低", "买菜"],
+  ]) {
+    const control = await say("只看" + level + "优先级任务");
+    assert.ok(control.includes(title));
+    assert.equal(await say("只看优先级为" + level + "的任务"), control);
+  }
+  const selected = await say("查看优先级是高、工作量为小的已完成任务");
+  assert.match(selected, /已完成（1）[\s\S]*交材料/);
+  assert.doesNotMatch(selected, /交报告|买菜|还书/);
+  assert.deepEqual(store.list(), before);
+});
+
+test("已完成与未完成的自然问句只读取对应记录", async (t) => {
+  const { say, store } = await setup(t);
+  const wash = store.create("洗衣服");
+  const buy = store.create("买菜");
+  assert.match(await say("我已经完成了哪些任务？"), /还没有已完成/);
+  assert.match(await say("完成了洗衣服"), /已完成「洗衣服」/);
+  const before = [{ ...wash, done: true }, buy];
+  for (const phrase of ["我已经完成了哪些任务？", "完成了哪些任务", "哪些任务已经完成了？"]) {
+    assert.equal(await say(phrase), await say("查看已完成任务"));
+    assert.deepEqual(store.list(), before);
+  }
+  assert.equal(await say("我还没完成哪些任务？"), await say("只看未完成任务"));
+  assert.deepEqual(store.list(), before);
+});
+
 test("追问中的无效序号和过期上下文不会触发模型写入", async (t) => {
   let calls = 0;
   const interpret: Interpret = async () => {

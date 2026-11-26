@@ -42,10 +42,15 @@ function compact(text: string) {
     .toLowerCase();
 }
 
+export function matchingTitles(reference: string, tasks: Task[]): Task[] {
+  const term = compact(reference);
+  return tasks.filter((task) => compact(task.title) === term);
+}
+
 export function matchingTasks(reference: string, tasks: Task[]): Task[] {
   const term = compact(reference);
   if (!term) return [];
-  const exact = tasks.filter((task) => compact(task.title) === term);
+  const exact = matchingTitles(reference, tasks);
   if (exact.length) return exact;
   const inverted = /^(.+?)(买|洗|取|寄|交|写|读|发|拿|订|还|做|打扫|整理)$/u.exec(term);
   return tasks.filter((task) => {
@@ -148,12 +153,20 @@ function create(text: string, now: Date): Intent {
   return { action: "create", title, dueDate, ...details };
 }
 
-export function parseLocal(input: string, tasks: Task[], now: Date): Intent | undefined {
-  const text = input
+function commandText(input: string) {
+  return input
     .trim()
     .replace(/[。！？!?～~]+$/u, "")
     .trim()
     .replace(/^(?:小明[，,\s]*)?(?:(?:请|麻烦|帮我|给我|再)[，,\s]*)*/u, "");
+}
+
+export function isCancellation(input: string) {
+  return /^(?:取消|算了|不用了|不改了)$/u.test(commandText(input));
+}
+
+export function parseLocal(input: string, tasks: Task[], now: Date): Intent | undefined {
+  const text = commandText(input);
   if (/(?:然后|顺便|同时)(?:再|也|帮我|把|将|记|加|删|完成)|都删|全删|全部删|都完成/u.test(text))
     return { action: "clarify", question: "一次可以处理一条任务。先处理哪一条？" };
   if (/(?:了[吗么]|过[吗么])$/u.test(text)) return { action: "list", scope: "all" };
@@ -195,8 +208,12 @@ export function parseLocal(input: string, tasks: Task[], now: Date): Intent | un
       : detailsHelp;
   }
   if (/^(?:查看|看看|只看|列出|显示)/u.test(text) && /优先级|工作量/u.test(text)) {
-    const priority = /[高中低]优先级|优先级[高中低]/u.exec(text)?.[0];
-    const workload = /(?:中等|[小中大])工作量|工作量[小中大]/u.exec(text)?.[0];
+    const priority = /[高中低]优先级|优先级\s*[为是]?\s*[高中低]/u.exec(text)?.[0];
+    const workload = /(?:中等|[小中大])工作量|工作量\s*[为是]?\s*(?:中等|[小中大])/u.exec(
+      text,
+    )?.[0];
+    if ((text.includes("优先级") && !priority) || (text.includes("工作量") && !workload))
+      return detailsHelp;
     const details = parseDetails([priority, workload].filter(Boolean).join("，"));
     if (details)
       return {
@@ -216,6 +233,15 @@ export function parseLocal(input: string, tasks: Task[], now: Date): Intent | un
       text,
     );
   if (add) return create(add[1], now);
+
+  const statusQuestion =
+    /^(?:我)?(?:已经|已|还没(?:有)?|尚未|未|没有|没)?完成了?(?:哪些|哪几[项条个]|什么)(?:任务|待办|事项)?[呢啊]?$/u.test(
+      text,
+    ) ||
+    /^(?:有)?(?:哪些|哪几[项条个])(?:任务|待办|事项)(?:已经|已|还没(?:有)?|尚未|未|没有|没)?完成了?[呢啊]?$/u.test(
+      text,
+    );
+  if (statusQuestion) return { action: "list", scope: /没|未/u.test(text) ? "open" : "done" };
 
   const mentionsWrite = /(?:删|移除|勾选|标记|完成了)/u.test(text);
   if (!mentionsWrite && /今天.*(?:到期|截止)|(?:到期|截止).*今天/u.test(text)) {
@@ -237,10 +263,7 @@ export function parseLocal(input: string, tasks: Task[], now: Date): Intent | un
           : "all",
     };
   }
-  if (
-    /^(?:取消|算了|不用了|不改了)$/u.test(text) ||
-    /(?:别|暂缓|不要|不用删|不想|还没|尚未|没有|没买|没洗|没取|没做|未完成$)/u.test(text)
-  ) {
+  if (/(?:别|暂缓|不要|不用删|不想|还没|尚未|没有|没买|没洗|没取|没做|未完成$)/u.test(text)) {
     return { action: "clarify", question: "好的，清单保持原样。" };
   }
   if (/^(?:如果|假如|要是)/u.test(text))

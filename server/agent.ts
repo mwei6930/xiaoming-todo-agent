@@ -1,7 +1,9 @@
 import type { ChatMessage } from "../shared/chat.ts";
 import {
   intentSchema,
+  isCancellation,
   matchingTasks,
+  matchingTitles,
   parseLocal,
   type TargetIntent,
   type Intent,
@@ -62,7 +64,7 @@ interface PendingChoice {
   tasks: Task[];
 }
 
-function selectOption(text: string, options: Task[]): Task[] {
+function selectOption(text: string, options: Task[], allowPartialTitle: boolean): Task[] {
   const answer = text.trim().replace(/[。！!]+$/u, "");
   const id = /^#([a-f\d-]{8,})$/iu.exec(answer);
   if (id) return options.filter((task) => task.id.startsWith(id[1].toLowerCase()));
@@ -71,7 +73,11 @@ function selectOption(text: string, options: Task[]): Task[] {
     const index = Number(number[1]) || "一二三四五六七八九十".indexOf(number[1]) + 1;
     return options[index - 1] ? [options[index - 1]] : [];
   }
-  return matchingTasks(answer.replace(/(?:的)?(?:那个|那条|那项|的)$/u, ""), options);
+  const exact = matchingTitles(text, options);
+  if (exact.length) return exact;
+  return allowPartialTitle
+    ? matchingTasks(answer.replace(/(?:的)?(?:那个|那条|那项|的)$/u, ""), options)
+    : matchingTitles(answer, options);
 }
 
 export function createAgent(store: TaskStore, interpret?: Interpret, now = () => new Date()) {
@@ -155,6 +161,7 @@ export function createAgent(store: TaskStore, interpret?: Interpret, now = () =>
   return async function reply(messages: ChatMessage[]): Promise<string> {
     const input = messages.at(-1)?.content.trim();
     if (!input) return help;
+    if (isCancellation(input)) return "好的，清单保持原样。";
     const snapshot = store.list();
     const date = now();
     const today = localDate(date);
@@ -162,16 +169,18 @@ export function createAgent(store: TaskStore, interpret?: Interpret, now = () =>
     const previous = messages.at(-2);
     const pending = previous?.role === "assistant" ? questions.get(previous.content) : undefined;
     if (
-      !intent &&
+      intent?.action !== "list" &&
+      intent?.action !== "clarify" &&
       !pending &&
       previous?.role === "assistant" &&
       /^你要[^\n]+？[^\n]*回复序号或标题/u.test(previous.content)
     )
       return changed;
-    if (!intent && pending) {
-      const options = selectOption(input, pending.tasks);
+    if (pending) {
+      const options = selectOption(input, pending.tasks, !intent);
       if (options.length === 1) return applyTarget(pending.intent, options[0]);
-      return ask(pending.intent, options.length ? options : pending.tasks);
+      if (options.length || (intent?.action !== "list" && intent?.action !== "clarify"))
+        return ask(pending.intent, options.length ? options : pending.tasks);
     }
 
     const noLocalMatch = intent && "ids" in intent && !intent.ids.length;
