@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,4 +107,41 @@ test("到期日在任务 API 中可选，创建和修改均验证实际日历日
   assert.equal((await request("PATCH", path, { dueDate: "tomorrow" })).status, 400);
   assert.equal((await request("PATCH", path, { dueDate: "2028-03-01" })).status, 200);
   assert.equal((await request("GET", url)).body[0].dueDate, "2028-03-01");
+});
+
+test("HTTP 接口验证父子关系、状态冲突和属性枚举", async (t) => {
+  const { request } = await startTestApp(t);
+  const url = "/api/tasks";
+  const parent = (await request("POST", url, { title: "项目", priority: 2 })).body;
+  const parentUrl = url + "/" + parent.id;
+  assert.equal((await request("POST", url, { title: "孤立", parentId: "missing" })).status, 404);
+  assert.equal((await request("PATCH", parentUrl, { priority: 4 })).status, 400);
+  assert.equal((await request("POST", url, { title: "资料", workload: "big" })).status, 400);
+  const child = (
+    await request("POST", url, { title: "资料", parentId: parent.id, workload: "small" })
+  ).body;
+  const childUrl = url + "/" + child.id;
+  assert.equal(child.parentId, parent.id);
+  assert.equal((await request("POST", url, { title: "三级", parentId: child.id })).status, 409);
+  assert.equal((await request("PATCH", childUrl, { parentId: child.id })).status, 400);
+  assert.equal((await request("DELETE", parentUrl)).status, 409);
+  assert.equal((await request("PATCH", parentUrl, { done: true })).status, 409);
+  assert.equal((await request("PATCH", childUrl, { done: true, workload: "medium" })).status, 200);
+  assert.equal((await request("PATCH", parentUrl, { done: true })).status, 200);
+  assert.equal((await request("PATCH", childUrl, { done: false })).status, 409);
+  assert.equal((await request("POST", url, { title: "新的", parentId: parent.id })).status, 409);
+  assert.equal((await request("DELETE", childUrl)).status, 204);
+  assert.equal((await request("DELETE", parentUrl)).status, 204);
+});
+
+test("旧格式的自由扩展字段不会妨碍读取或因其他更新丢失", async (t) => {
+  const { request, filename } = await startTestApp(t);
+  const legacy = { id: "legacy", title: "旧项目", done: false, priority: "urgent", workload: 4 };
+  await writeFile(filename, JSON.stringify([legacy]));
+  const listed = await request("GET", "/api/tasks");
+  assert.deepEqual(listed.body, [{ id: "legacy", title: "旧项目", done: false }]);
+  await request("PATCH", "/api/tasks/legacy", { done: true });
+  assert.deepEqual(JSON.parse(await readFile(filename, "utf8")), [{ ...legacy, done: true }]);
+  await request("PATCH", "/api/tasks/legacy", { priority: 1 });
+  assert.equal((await request("GET", "/api/tasks")).body[0].priority, 1);
 });

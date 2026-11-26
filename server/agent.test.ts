@@ -176,3 +176,84 @@ test("模型解析期间其他请求修改清单时放弃陈旧操作", async (t
   assert.match(await say("周五的碰头会取消啦"), /清单刚发生变化/);
   assert.deepEqual(store.list(), [{ ...task, title: "另一场会议" }]);
 });
+
+test("子任务、属性筛选、到期清单与磁盘重载使用相同记录", async (t) => {
+  const { say, store, file } = await setup(t);
+  await say("记一下复习机器学习，优先级高，工作量大");
+  const [parent] = store.list();
+  assert.equal(parent.priority, 1);
+  assert.equal(parent.workload, "large");
+  assert.match(await say("给复习机器学习添加子任务：今天做真题"), /已添加子任务「做真题」/);
+  const [, child] = store.list();
+  assert.equal(child.parentId, parent.id);
+  assert.equal(child.dueDate, "2028-02-28");
+  assert.match(await say("查看复习机器学习的子任务"), /0\/1 已完成[\s\S]*待办 · 做真题/);
+  assert.match(await say("今天有哪些任务到期？"), /做真题[\s\S]*所属「复习机器学习」/);
+  await say("把做真题的优先级设为高，工作量设为中");
+  assert.match(await say("查看今天到期的高优先级任务"), /今天到期（1）[\s\S]*做真题/);
+  assert.match(await say("只看高优先级任务"), /待办（2）/);
+  const medium = await say("查看中工作量任务");
+  assert.match(medium, /待办（1）[\s\S]*做真题/);
+  assert.match(await say("完成复习机器学习"), /还有未完成的子任务/);
+  assert.match(await say("完成复习机器学习的子任务做真题"), /已完成「做真题」/);
+  assert.match(await say("查看复习机器学习的子任务"), /1\/1 已完成/);
+  assert.equal(store.list()[0].done, false);
+  await say("完成复习机器学习");
+  assert.deepEqual(createJsonTaskStore(file).list(), [
+    { ...parent, done: true },
+    { ...child, done: true, priority: 1, workload: "medium" },
+  ]);
+  assert.match(await say("删除复习机器学习"), /先逐条删除子任务/);
+  await say("删除复习机器学习的子任务做真题");
+  assert.deepEqual(store.list(), [{ ...parent, done: true }]);
+});
+
+test("不同父任务下的同名子任务可消歧或用父任务限定", async (t) => {
+  const { say, store } = await setup(t);
+  await say("记一下周一复习");
+  await say("记一下周二复习");
+  assert.match(await say("给复习添加子任务：真题"), /哪条任务/);
+  await say("第一个");
+  await say("给周二复习添加子任务：真题");
+  assert.equal(store.list().length, 4);
+  const prompt = await say("把真题的工作量设为小");
+  assert.match(prompt, /所属「周一复习」/);
+  assert.match(prompt, /所属「周二复习」/);
+  await say("第二个");
+  assert.equal(store.list()[2].workload, undefined);
+  assert.equal(store.list()[3].workload, "small");
+  await say("删除周一复习的子任务真题");
+  assert.equal(store.list()[2].parentId, store.list()[1].id);
+  assert.equal(store.list().length, 3);
+});
+
+test("错误属性、丢失的父任务和嵌套层级不会生成顶层孤立记录", async (t) => {
+  const { say, store } = await setup(t);
+  await say("记一下交报告，工作量巨大");
+  assert.deepEqual(store.list(), []);
+  await say("给不存在的父任务添加子任务：资料");
+  assert.deepEqual(store.list(), []);
+  await say("记一下交报告");
+  await say("给交报告添加子任务：找资料");
+  const before = store.list();
+  await say("给找资料添加子任务：下载文件");
+  await say("把交报告的优先级设为特级");
+  assert.deepEqual(store.list(), before);
+});
+
+test("模型结构化意图能维护父子关系与属性", async (t) => {
+  let proposal: unknown;
+  const { say, store } = await setup(t, async () => proposal);
+  const parent = store.create("期末");
+  proposal = { action: "addChild", ids: [parent.id], title: "刷题", priority: 2 };
+  await say("给期末安排一个小步骤吧");
+  const [, child] = store.list();
+  assert.equal(child.parentId, parent.id);
+  proposal = { action: "setDetails", ids: [child.id], workload: "large" };
+  await say("估计这活够呛");
+  assert.equal(store.list()[1].priority, 2);
+  assert.equal(store.list()[1].workload, "large");
+  proposal = { action: "setDetails", ids: [child.id], priority: 4 };
+  assert.match(await say("这个比其他事还急"), /没能解析/);
+  assert.equal(store.list()[1].priority, 2);
+});

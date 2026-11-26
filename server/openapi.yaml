@@ -31,6 +31,9 @@ paths:
               properties:
                 title: { $ref: "#/components/schemas/Title" }
                 dueDate: { $ref: "#/components/schemas/DueDate" }
+                parentId: { type: string, minLength: 1, description: "可选，指向未完成的顶层任务" }
+                priority: { $ref: "#/components/schemas/Priority" }
+                workload: { $ref: "#/components/schemas/Workload" }
       responses:
         "201":
           description: 新建的任务
@@ -38,6 +41,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Task" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/tasks/{id}:
     parameters:
       - name: id
@@ -46,7 +51,7 @@ paths:
         schema: { type: string }
     patch:
       operationId: updateTask
-      summary: 修改标题、完成状态或到期日
+      summary: 修改标题、完成状态、到期日、优先级或工作量
       requestBody:
         required: true
         content:
@@ -59,6 +64,8 @@ paths:
                 title: { $ref: "#/components/schemas/Title" }
                 done: { type: boolean }
                 dueDate: { $ref: "#/components/schemas/DueDate" }
+                priority: { $ref: "#/components/schemas/Priority" }
+                workload: { $ref: "#/components/schemas/Workload" }
       responses:
         "200":
           description: 更新后的任务
@@ -67,6 +74,7 @@ paths:
               schema: { $ref: "#/components/schemas/Task" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
     delete:
       operationId: deleteTask
       summary: 删除一条任务
@@ -74,8 +82,17 @@ paths:
         "204":
           description: 删除成功，响应体为空
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 components:
   schemas:
+    Priority:
+      type: integer
+      enum: [1, 2, 3]
+      description: "1 高、2 中、3 低"
+    Workload:
+      type: string
+      enum: [small, medium, large]
+      description: "工作量为小、中或大"
     DueDate:
       type: string
       format: date
@@ -93,12 +110,20 @@ components:
         title: { $ref: "#/components/schemas/Title" }
         done: { type: boolean }
         dueDate: { $ref: "#/components/schemas/DueDate" }
+        parentId: { type: string, description: "所属父任务 ID，仅子任务返回" }
+        priority: { $ref: "#/components/schemas/Priority" }
+        workload: { $ref: "#/components/schemas/Workload" }
     Error:
       type: object
       required: [error]
       properties:
         error: { type: string }
   responses:
+    Conflict:
+      description: 操作与父子任务的当前状态冲突
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: 请求字段无效
       content:
