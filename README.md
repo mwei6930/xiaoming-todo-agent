@@ -57,6 +57,8 @@ npm run dev
 
 ### 本地检查
 
+按候选标题删除、按优先级筛选和查询已完成任务的复测步骤及结果见[功能测试报告（Word）](docs/functional-test-report.docx)。
+
 在根目录运行 `npm test`、`npm run typecheck`、`npm run lint`、`npm run fmt:check` 和 `npm run build`。自动化用例使用临时目录，模型分支使用测试替身，可以离线复现。
 
 服务端先识别常见指令。其他说法在配置密钥后由 DeepSeek 输出结构化意图，Zod 校验动作与参数，执行层核实目标 ID 并依据存储结果回复。多条记录匹配时会询问用户。实现入口见[智能体](server/agent.ts)、[意图解析](server/intent.ts)和[模型客户端](server/model.ts)。
