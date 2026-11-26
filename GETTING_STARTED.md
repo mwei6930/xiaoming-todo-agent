@@ -5,8 +5,8 @@
 安装 Node.js 24.12 或更高版本（含 npm）。在终端执行以下命令。
 
 ```sh
-git clone https://github.com/TokeNow/todo-agent.git
-cd todo-agent
+git clone https://github.com/mwei6930/xiaoming-todo-agent.git
+cd xiaoming-todo-agent
 npm ci
 npm run dev
 ```
@@ -39,10 +39,10 @@ npm run dev
 ```sh
 curl -sS http://127.0.0.1:3000/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"你好"}]}'
+  -d '{"messages":[{"role":"user","content":"看看清单"}]}'
 ```
 
-初始响应为 `{"reply":"你好，欢迎使用小明智能体"}`。后续请求可在 `messages` 中按顺序传入之前的用户消息和小明的回复，再追加最新的用户消息。
+空清单的响应为 `{"reply":"清单是空的。想记什么事？"}`。后续请求在 `messages` 中按顺序传入之前的用户消息和小明的回复，再追加最新的用户消息。遇到多个匹配任务时，保留上一轮追问，下一轮可回复序号或标题。
 
 创建一条任务，然后检查列表。
 

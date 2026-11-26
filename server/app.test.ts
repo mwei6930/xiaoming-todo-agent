@@ -96,3 +96,15 @@ test("聊天 API 只将有效的完整对话传给智能体，并返回其回复
   assert.equal(invalid.status, 400);
   assert.deepEqual(conversations, [messages]);
 });
+
+test("到期日在任务 API 中可选，创建和修改均验证实际日历日期", async (t) => {
+  const { request } = await startTestApp(t);
+  const url = "/api/tasks";
+  assert.equal((await request("POST", url, { title: "报告", dueDate: "2027-02-29" })).status, 400);
+  const result = await request("POST", url, { title: "报告", dueDate: "2028-02-29" });
+  assert.equal(result.status, 201);
+  const path = url + "/" + result.body.id;
+  assert.equal((await request("PATCH", path, { dueDate: "tomorrow" })).status, 400);
+  assert.equal((await request("PATCH", path, { dueDate: "2028-03-01" })).status, 200);
+  assert.equal((await request("GET", url)).body[0].dueDate, "2028-03-01");
+});

@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
 import type { TaskStore } from "./task-store.ts";
+import { dueDateSchema, titleSchema } from "./task-fields.ts";
 
-const createTaskSchema = z.strictObject({ title: z.string().trim().min(1).max(200) });
+const createTaskSchema = z.strictObject({ title: titleSchema, dueDate: dueDateSchema.optional() });
 const updateTaskSchema = createTaskSchema
   .partial()
   .extend({ done: z.boolean().optional() })
@@ -20,15 +21,17 @@ export function taskRouter(tasks: TaskStore) {
   router.post("/", (req, res) => {
     const input = createTaskSchema.safeParse(req.body);
     if (!input.success) {
-      return res.status(400).json({ error: "请提供 1 至 200 个字符的任务标题。" });
+      return res
+        .status(400)
+        .json({ error: "标题须为 1 至 200 个字符，到期日请用有效的 YYYY-MM-DD 日期。" });
     }
-    res.status(201).json(tasks.create(input.data.title));
+    res.status(201).json(tasks.create(input.data.title, input.data.dueDate));
   });
 
   router.patch("/:id", (req, res) => {
     const input = updateTaskSchema.safeParse(req.body);
     if (!input.success) {
-      return res.status(400).json({ error: "请提供有效的 title 或 done 字段。" });
+      return res.status(400).json({ error: "请提供有效的 title、done 或 dueDate 字段。" });
     }
 
     const updated = tasks.update(req.params.id, input.data);

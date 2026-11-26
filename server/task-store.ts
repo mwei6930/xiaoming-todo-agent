@@ -2,15 +2,21 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { dueDateSchema } from "./task-fields.ts";
 
-const storedTask = z.looseObject({ id: z.string(), title: z.string(), done: z.boolean() });
+const storedTask = z.looseObject({
+  id: z.string(),
+  title: z.string(),
+  done: z.boolean(),
+  dueDate: dueDateSchema.optional(),
+});
 const taskList = z.array(storedTask);
-type Task = z.infer<typeof storedTask>;
-type TaskChanges = Partial<Pick<Task, "title" | "done">>;
+export type Task = z.infer<typeof storedTask>;
+type TaskChanges = Partial<Pick<Task, "title" | "done" | "dueDate">>;
 
 export interface TaskStore {
   list(): Task[];
-  create(title: string): Task;
+  create(title: string, dueDate?: string): Task;
   update(id: string, changes: TaskChanges): Task | undefined;
   remove(id: string): boolean;
 }
@@ -32,8 +38,8 @@ export function createJsonTaskStore(filename: string): TaskStore {
   return {
     list,
 
-    create(title) {
-      const task = { id: randomUUID(), title, done: false };
+    create(title, dueDate) {
+      const task = { id: randomUUID(), title, done: false, ...(dueDate && { dueDate }) };
       save([...list(), task]);
       return task;
     },
